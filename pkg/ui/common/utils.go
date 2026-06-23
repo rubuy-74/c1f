@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -26,6 +27,19 @@ func RelativeTime(t time.Time) string {
 		return fmt.Sprintf("%d hours ago", int(diff.Hours()))
 	}
 	return t.Format("2006-01-02")
+}
+
+func FormatDurationMs(ms float64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%.0fms", ms)
+	}
+	seconds := ms / 1000
+	if seconds < 60 {
+		return fmt.Sprintf("%.1fs", seconds)
+	}
+	minutes := seconds / 60
+	seconds = math.Mod(seconds, 60)
+	return fmt.Sprintf("%.0fm %.0fs", minutes, seconds)
 }
 
 // FormatStepOutput takes a JSON raw message from a step output and returns a

@@ -142,3 +142,11 @@ func (c *Client) GetWorkflowInstance(ctx context.Context, workflowName, instance
 
 	return instance, nil
 }
+
+func (c *Client) APIToken() string {
+	return c.apiToken
+}
+
+func (c *Client) AccountID() string {
+	return c.accountID
+}
