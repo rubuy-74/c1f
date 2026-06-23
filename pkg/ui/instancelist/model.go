@@ -34,8 +34,16 @@ func (i item) Title() string {
 }
 
 func (i item) Description() string {
-	started := common.RelativeTime(i.instance.CreatedAt)
-	return fmt.Sprintf("Started: %s | Trigger: %s", started, i.instance.Trigger)
+	createdAt := i.instance.DisplayCreatedAt()
+	started := common.RelativeTime(createdAt)
+	if createdAt.IsZero() {
+		started = "—"
+	}
+	trigger := i.instance.Trigger.String()
+	if trigger == "" {
+		trigger = "—"
+	}
+	return fmt.Sprintf("Started: %s | Trigger: %s", started, trigger)
 }
 
 func (i item) FilterValue() string { return i.instance.ID }
@@ -48,7 +56,13 @@ type Model struct {
 }
 
 func New(client *api.Client) Model {
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FAFAFA"))
+	delegate.Styles.NormalDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF87D7")).Bold(true)
+	delegate.Styles.SelectedDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB2D7"))
+
+	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 
@@ -82,7 +96,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if msg.instances[i].Status != "running" && msg.instances[j].Status == "running" {
 				return false
 			}
-			return msg.instances[i].CreatedAt.After(msg.instances[j].CreatedAt)
+			return msg.instances[i].DisplayCreatedAt().After(msg.instances[j].DisplayCreatedAt())
 		})
 
 		items := make([]list.Item, len(msg.instances))
@@ -91,6 +105,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 		m.list.SetItems(items)
 		m.loaded = true
+	case tea.KeyMsg:
+		if m.list.FilterState() != list.Filtering {
+			switch msg.String() {
+			case "enter":
+				if i, ok := m.list.SelectedItem().(item); ok {
+					return m, func() tea.Msg {
+						return common.InstanceSelectedMsg{
+							Workflow: m.workflow,
+							Instance: i.instance,
+						}
+					}
+				}
+			}
+		}
 	}
 
 	var cmd tea.Cmd

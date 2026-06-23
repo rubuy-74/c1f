@@ -8,6 +8,11 @@ type WorkflowSelectedMsg struct {
 	Workflow models.Workflow
 }
 
+type InstanceSelectedMsg struct {
+	Workflow models.Workflow
+	Instance models.Instance
+}
+
 type ErrorMsg struct {
 	Err error
 }

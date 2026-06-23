@@ -9,14 +9,26 @@ import (
 	"github.com/c1f/c1f/pkg/ui/common"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type item struct {
 	workflow models.Workflow
 }
 
-func (i item) Title() string       { return i.workflow.Name }
-func (i item) Description() string { return fmt.Sprintf("ID: %s | Created: %s", i.workflow.ID, i.workflow.CreatedAt.Format("2006-01-02 15:04")) }
+func (i item) Title() string { return i.workflow.Name }
+func (i item) Description() string {
+	createdAt := i.workflow.DisplayCreatedAt()
+	created := createdAt.Format("2006-01-02 15:04")
+	if createdAt.IsZero() {
+		created = "—"
+	}
+	id := i.workflow.ID
+	if id == "" {
+		id = "—"
+	}
+	return fmt.Sprintf("ID: %s | Created: %s", id, created)
+}
 func (i item) FilterValue() string { return i.workflow.Name }
 
 type Model struct {
@@ -26,7 +38,13 @@ type Model struct {
 }
 
 func New(client *api.Client) Model {
-	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.NormalTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FAFAFA"))
+	delegate.Styles.NormalDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#A3A3A3"))
+	delegate.Styles.SelectedTitle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF87D7")).Bold(true)
+	delegate.Styles.SelectedDesc = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB2D7"))
+
+	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.Title = "Workflows"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)

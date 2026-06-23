@@ -7,7 +7,6 @@ import (
 	"os"
 
 	"github.com/c1f/c1f/pkg/api"
-	"github.com/c1f/c1f/pkg/models"
 	"github.com/c1f/c1f/pkg/ui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
@@ -65,32 +64,26 @@ func main() {
 
 			client := api.NewClient(apiToken, accountID)
 			client.Debug = debug
-			result, err := client.GetWorkflowInstance(context.Background(), workflowName, instanceID)
+			instance, err := client.GetWorkflowInstance(context.Background(), workflowName, instanceID)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				if debug && result != nil {
-					fmt.Fprintln(os.Stderr, string(result))
-				}
 				os.Exit(1)
 			}
 
-			var instance models.Instance
-			if err := json.Unmarshal(result, &instance); err == nil {
-				if instance.Status == "running" {
-					_, progressStr := instance.CalculateProgress()
-
-					var data map[string]interface{}
-					if err := json.Unmarshal(result, &data); err == nil {
-						data["calculated_progress"] = progressStr
-						if augmented, err := json.MarshalIndent(data, "", "  "); err == nil {
-							fmt.Println(string(augmented))
-							return nil
-						}
-					}
-				}
+			if instance.Status == "running" {
+				_, progressStr := instance.CalculateProgress()
+				fmt.Printf("Instance ID: %s\nStatus: %s\nProgress: %s\nSteps: %d\n", 
+					instance.ID, instance.Status, progressStr, len(instance.Steps))
+			} else {
+				fmt.Printf("Instance ID: %s\nStatus: %s\nSteps: %d\n", 
+					instance.ID, instance.Status, len(instance.Steps))
 			}
 
-			fmt.Println(string(result))
+			out, err := json.MarshalIndent(instance, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal instance: %w", err)
+			}
+			fmt.Println(string(out))
 			return nil
 		},
 	}

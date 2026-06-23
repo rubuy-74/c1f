@@ -129,6 +129,16 @@ func (c *Client) ListInstances(ctx context.Context, workflowName string) ([]mode
 	return instances, nil
 }
 
-func (c *Client) GetWorkflowInstance(ctx context.Context, workflowName, instanceID string) (json.RawMessage, error) {
-	return c.doRequest(ctx, http.MethodGet, fmt.Sprintf("workflows/%s/instances/%s", workflowName, instanceID))
+func (c *Client) GetWorkflowInstance(ctx context.Context, workflowName, instanceID string) (models.Instance, error) {
+	res, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("workflows/%s/instances/%s", workflowName, instanceID))
+	if err != nil {
+		return models.Instance{}, err
+	}
+
+	var instance models.Instance
+	if err := json.Unmarshal(res, &instance); err != nil {
+		return models.Instance{}, fmt.Errorf("failed to unmarshal instance: %w", err)
+	}
+
+	return instance, nil
 }
