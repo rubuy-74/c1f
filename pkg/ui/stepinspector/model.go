@@ -10,6 +10,8 @@ import (
 	"github.com/c1f/c1f/pkg/api"
 	"github.com/c1f/c1f/pkg/models"
 	"github.com/c1f/c1f/pkg/ui/common"
+	"github.com/c1f/c1f/pkg/ui/help"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -32,21 +34,25 @@ const (
 )
 
 type Model struct {
-	client      *api.Client
-	workflow    models.Workflow
-	instance    models.Instance
-	loaded      bool
-	width       int
-	height      int
-	cursor      int
-	viewport    viewport.Model
-	activePane  pane
-	wrapping    bool
-	filter      filter
-	showRaw     bool
-	rawViewport viewport.Model
-	error       error
-	errTimer    *time.Timer
+	client       *api.Client
+	workflow     models.Workflow
+	instance     models.Instance
+	loaded       bool
+	width        int
+	height       int
+	cursor       int
+	viewport     viewport.Model
+	activePane   pane
+	wrapping     bool
+	filter       filter
+	showRaw      bool
+	rawViewport  viewport.Model
+	error        error
+	errTimer     *time.Timer
+	help         help.Model
+	searchInput  textinput.Model
+	searchMode   bool
+	searchQuery  string
 }
 
 func New(client *api.Client) Model {
@@ -71,35 +77,90 @@ func (m *Model) SetInstance(w models.Workflow, i models.Instance) tea.Cmd {
 	m.filter = filterAll
 	m.showRaw = false
 	m.error = nil
+	m.searchMode = false
+	m.searchQuery = ""
+	m.searchInput = textinput.New()
+	m.searchInput.Placeholder = "Filter steps..."
+	m.searchInput.Width = 30
+
+	m.help = help.New([]help.Section{
+		{
+			Title: "Global",
+			Bindings: []help.Binding{
+				{Key: "?", Description: "Toggle help"},
+				{Key: "q", Description: "Quit"},
+				{Key: "esc / b", Description: "Go back / dismiss"},
+			},
+		},
+		{
+			Title: "Navigation",
+			Bindings: []help.Binding{
+				{Key: "j / k", Description: "Move down / up"},
+				{Key: "gg / G", Description: "Jump to first / last step"},
+				{Key: "tab", Description: "Focus detail pane"},
+			},
+		},
+		{
+			Title: "Filters & Search",
+			Bindings: []help.Binding{
+				{Key: "/", Description: "Search steps by name"},
+				{Key: "f", Description: "Cycle status filter"},
+			},
+		},
+		{
+			Title: "Actions",
+			Bindings: []help.Binding{
+				{Key: "r", Description: "Refresh instance"},
+				{Key: "v", Description: "Toggle raw JSON"},
+				{Key: "w", Description: "Toggle line wrapping"},
+			},
+		},
+	})
+
 	return m.FetchInstance
 }
 
 type clearErrorMsg struct{}
 
 func (m *Model) filteredSteps() []models.Step {
-	if m.filter == filterAll {
-		return m.instance.Steps
-	}
+	steps := m.instance.Steps
 
-	var filtered []models.Step
-	for _, step := range m.instance.Steps {
-		normalized := step.Status.Normalize()
-		switch m.filter {
-		case filterFailed:
-			if normalized == models.StepStatusFailure {
-				filtered = append(filtered, step)
-			}
-		case filterRunning:
-			if normalized == models.StepStatusRunning {
-				filtered = append(filtered, step)
-			}
-		case filterSuccess:
-			if normalized == models.StepStatusSuccess {
-				filtered = append(filtered, step)
+	// Apply status filter.
+	if m.filter != filterAll {
+		var statusFiltered []models.Step
+		for _, step := range steps {
+			normalized := step.Status.Normalize()
+			switch m.filter {
+			case filterFailed:
+				if normalized == models.StepStatusFailure {
+					statusFiltered = append(statusFiltered, step)
+				}
+			case filterRunning:
+				if normalized == models.StepStatusRunning {
+					statusFiltered = append(statusFiltered, step)
+				}
+			case filterSuccess:
+				if normalized == models.StepStatusSuccess {
+					statusFiltered = append(statusFiltered, step)
+				}
 			}
 		}
+		steps = statusFiltered
 	}
-	return filtered
+
+	// Apply search filter by step name (case-insensitive).
+	if m.searchQuery != "" {
+		query := strings.ToLower(m.searchQuery)
+		var searchFiltered []models.Step
+		for _, step := range steps {
+			if strings.Contains(strings.ToLower(step.Name), query) {
+				searchFiltered = append(searchFiltered, step)
+			}
+		}
+		steps = searchFiltered
+	}
+
+	return steps
 }
 
 func (m *Model) updateViewport() {
@@ -192,6 +253,14 @@ func (m Model) IsRawMode() bool {
 	return m.showRaw
 }
 
+func (m Model) IsHelpVisible() bool {
+	return m.help.Visible()
+}
+
+func (m Model) IsSearching() bool {
+	return m.searchMode
+}
+
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	var cmds []tea.Cmd
@@ -209,6 +278,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		
 		m.rawViewport.Width = m.width - 2
 		m.rawViewport.Height = m.height - 2
+
+		m.help.SetSize(msg.Width, msg.Height)
+		m.searchInput.Width = leftWidth - 4
 
 		if !m.loaded {
 			m.viewport.SetContent("Loading...")
@@ -244,6 +316,35 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Help overlay takes precedence.
+		if m.help.Visible() {
+			var helpCmd tea.Cmd
+			m.help, helpCmd = m.help.Update(msg)
+			return m, helpCmd
+		}
+
+		// Search mode takes precedence.
+		if m.searchMode {
+			switch msg.String() {
+			case "esc":
+				m.searchMode = false
+				m.searchQuery = ""
+				m.searchInput.SetValue("")
+				m.cursor = 0
+				m.updateViewport()
+				return m, nil
+			case "enter":
+				m.searchMode = false
+				m.searchQuery = m.searchInput.Value()
+				m.cursor = 0
+				m.updateViewport()
+				return m, nil
+			}
+			var searchCmd tea.Cmd
+			m.searchInput, searchCmd = m.searchInput.Update(msg)
+			return m, searchCmd
+		}
+
 		if m.showRaw {
 			switch msg.String() {
 			case "v", "esc":
@@ -256,6 +357,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
+		case "?":
+			m.help.Show()
+			return m, nil
 		case "r":
 			m.loaded = false
 			return m, m.FetchInstance
@@ -268,6 +372,11 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.showRaw = true
 			m.updateRawViewport()
 			return m, nil
+		case "/":
+			m.searchMode = true
+			m.searchInput.Focus()
+			m.activePane = listPane
+			return m, textinput.Blink
 		}
 
 		if m.activePane == listPane {
@@ -283,6 +392,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 					m.cursor++
 					m.updateViewport()
 				}
+			case "gg":
+				m.cursor = 0
+				m.updateViewport()
+			case "G":
+				m.cursor = len(steps) - 1
+				if m.cursor < 0 {
+					m.cursor = 0
+				}
+				m.updateViewport()
 			case "tab":
 				m.activePane = detailPane
 			}
@@ -307,6 +425,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 func (m Model) View() string {
 	if !m.loaded && m.error == nil {
 		return fmt.Sprintf("\n  Loading instance %s...", m.instance.ID)
+	}
+
+	if m.help.Visible() {
+		return m.help.View()
 	}
 
 	if m.showRaw {
@@ -367,17 +489,25 @@ func (m Model) View() string {
 		}
 	}
 
-	// Filter indicator
-	filterText := "Filter: All"
-	switch m.filter {
-	case filterFailed:
-		filterText = "Filter: Failed"
-	case filterRunning:
-		filterText = "Filter: Running"
-	case filterSuccess:
-		filterText = "Filter: Success"
+	// Search input
+	if m.searchMode {
+		leftContent = m.searchInput.View() + "\n\n" + leftContent
+	} else {
+		// Filter indicator
+		filterText := "Filter: All"
+		switch m.filter {
+		case filterFailed:
+			filterText = "Filter: Failed"
+		case filterRunning:
+			filterText = "Filter: Running"
+		case filterSuccess:
+			filterText = "Filter: Success"
+		}
+		if m.searchQuery != "" {
+			filterText += fmt.Sprintf(" | Search: %s", m.searchQuery)
+		}
+		leftContent = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(filterText) + "\n\n" + leftContent
 	}
-	leftContent = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(filterText) + "\n\n" + leftContent
 
 	// Error message (toast)
 	if m.error != nil {

@@ -86,6 +86,36 @@ func (m RootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, subCmd
 		}
 
+		// If a view's help overlay is visible, let it handle Esc/q/?.
+		if (m.state == workflowListState && m.workflowList.IsHelpVisible()) ||
+			(m.state == instanceListState && m.instanceList.IsHelpVisible()) ||
+			(m.state == stepInspectorState && m.stepInspector.IsHelpVisible()) {
+			switch m.state {
+			case workflowListState:
+				m.workflowList, cmd = m.workflowList.Update(msg)
+			case instanceListState:
+				m.instanceList, cmd = m.instanceList.Update(msg)
+			case stepInspectorState:
+				m.stepInspector, cmd = m.stepInspector.Update(msg)
+			}
+			return m, cmd
+		}
+
+		// If a view is in filter/search mode, let it handle Esc first.
+		if (m.state == workflowListState && m.workflowList.IsFiltering()) ||
+			(m.state == instanceListState && m.instanceList.IsFiltering()) ||
+			(m.state == stepInspectorState && m.stepInspector.IsSearching()) {
+			switch m.state {
+			case workflowListState:
+				m.workflowList, cmd = m.workflowList.Update(msg)
+			case instanceListState:
+				m.instanceList, cmd = m.instanceList.Update(msg)
+			case stepInspectorState:
+				m.stepInspector, cmd = m.stepInspector.Update(msg)
+			}
+			return m, cmd
+		}
+
 		switch msg.String() {
 		case "q":
 			return m, tea.Quit
